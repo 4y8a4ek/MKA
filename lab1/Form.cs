@@ -9,7 +9,7 @@ public class MainForm : Form
     private List<Vec3> nodes;
     private List<Prism> prisms;
 
-    // Углы поворота (радианы)
+
     private double angleX = 0.6;
     private double angleY = 0.8;
     private double scale = 1.0;

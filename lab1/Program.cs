@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.IO;
 using System.Windows.Forms;
 
 namespace Lab1
@@ -22,7 +23,8 @@ namespace Lab1
     public class Tet
     {
         public int[] V = new int[4];
-        public Tet(int a, int b, int c, int d) { V[0] = a; V[1] = b; V[2] = c; V[3] = d; }
+        public Tet(int a, int b, int c, int d)
+        { V[0] = a; V[1] = b; V[2] = c; V[3] = d; }
     }
 
     public class BFace
@@ -31,6 +33,85 @@ namespace Lab1
         public BFace(int a, int b, int c) { A = a; B = b; C = c; }
     }
 
+    public class Subdomain
+    {
+        public int Material;
+        public int Nxb, Nxe, Nyb, Nye, Nzb, Nze;
+    }
+
+    public class DomainDescription
+    {
+        public int Kx, Ky, Kz;
+        public double[,] X;
+        public double[,] Y;
+        public double[] Z;
+        public List<Subdomain> Subdomains = new List<Subdomain>();
+    }
+
+    public static class DomainFileReader
+    {
+        public static DomainDescription Read(string path)
+        {
+            var lines = File.ReadAllLines(path);
+            int p = 0;
+            var d = new DomainDescription();
+
+            var head = Split(lines[p++]);
+            d.Kx = int.Parse(head[0], CultureInfo.InvariantCulture);
+            d.Ky = int.Parse(head[1], CultureInfo.InvariantCulture);
+
+            d.X = new double[d.Ky, d.Kx];
+            d.Y = new double[d.Ky, d.Kx];
+            for (int j = 0; j < d.Ky; j++)
+            {
+                var t = Split(lines[p++]);
+                for (int i = 0; i < d.Kx; i++)
+                {
+                    d.X[j, i] = double.Parse(t[2 * i], CultureInfo.InvariantCulture);
+                    d.Y[j, i] = double.Parse(t[2 * i + 1], CultureInfo.InvariantCulture);
+                }
+            }
+
+            d.Kz = int.Parse(lines[p++].Trim(), CultureInfo.InvariantCulture);
+            var zt = Split(lines[p++]);
+            d.Z = new double[d.Kz];
+            for (int k = 0; k < d.Kz; k++)
+                d.Z[k] = double.Parse(zt[k], CultureInfo.InvariantCulture);
+
+            int No = int.Parse(lines[p++].Trim(), CultureInfo.InvariantCulture);
+            for (int i = 0; i < No; i++)
+            {
+                var t = Split(lines[p++]);
+                d.Subdomains.Add(new Subdomain
+                {
+                    Material = int.Parse(t[0], CultureInfo.InvariantCulture),
+                    Nxb = int.Parse(t[1], CultureInfo.InvariantCulture),
+                    Nxe = int.Parse(t[2], CultureInfo.InvariantCulture),
+                    Nyb = int.Parse(t[3], CultureInfo.InvariantCulture),
+                    Nye = int.Parse(t[4], CultureInfo.InvariantCulture),
+                    Nzb = int.Parse(t[5], CultureInfo.InvariantCulture),
+                    Nze = int.Parse(t[6], CultureInfo.InvariantCulture)
+                });
+            }
+            return d;
+        }
+
+        private static string[] Split(string s) =>
+            s.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    public class Tetra
+    {
+        public int A, B, C, D;
+        public double Cx, Cy, Cz, R2;
+        public bool Alive = true;
+
+        public Tetra(int a, int b, int c, int d,
+                     double cx, double cy, double cz, double r2)
+        { A = a; B = b; C = c; D = d; Cx = cx; Cy = cy; Cz = cz; R2 = r2; }
+    }
+
+    
     public class MeshGenerator
     {
         public List<Node> Nodes = new List<Node>();
@@ -42,6 +123,7 @@ namespace Lab1
         private Dictionary<string, int> nodeMap = new Dictionary<string, int>();
 
         public double h = 1.0;
+        public DomainDescription Domain;
 
         public void Reset()
         {
@@ -117,7 +199,6 @@ namespace Lab1
                     }
                 }
             }
-
             for (int i = 0; i < nx; i++)
                 for (int j = 0; j < ny; j++)
                     for (int k = 0; k < nz; k++)
@@ -144,9 +225,9 @@ namespace Lab1
             double x6, double y6, double z6,
             double x7, double y7, double z7)
         {
-            double Lu = Dist(x0, y0, z0, x1, y1, z1);   
-            double Lv = Dist(x0, y0, z0, x3, y3, z3);  
-            double Lw = Dist(x0, y0, z0, x4, y4, z4);  
+            double Lu = Dist(x0, y0, z0, x1, y1, z1);
+            double Lv = Dist(x0, y0, z0, x3, y3, z3);
+            double Lw = Dist(x0, y0, z0, x4, y4, z4);
 
             int nx = Math.Max(1, (int)Math.Round(Lu / h));
             int ny = Math.Max(1, (int)Math.Round(Lv / h));
@@ -157,92 +238,103 @@ namespace Lab1
                 x4, y4, z4, x5, y5, z5, x6, y6, z6, x7, y7, z7,
                 nx, ny, nz);
         }
-
-
-        public void BuildShape()
+        public void LoadDomain(string path)
         {
-            double y0 = 0, y1 = 1, y2 = 3, y3 = 6;
-            double zMax = 6;
-            double zFloor = 2;
-
-            int nzFloor = Math.Max(1, (int)Math.Round(zFloor / h));
-            int nzWall = 3 * nzFloor;
-
-            int nyA = Math.Max(1, (int)Math.Round((y1 - y0) / h));
-            int nyB = Math.Max(1, (int)Math.Round((y2 - y1) / h));
-            int nyC = Math.Max(1, (int)Math.Round((y3 - y2) / h));
-
-            int nCols = 5;
-            int[] nu = new int[nCols];
-            nu[0] = Math.Max(1, (int)Math.Round(5.0 / h)); 
-            nu[1] = Math.Max(1, (int)Math.Round(2.0 / h)); 
-            nu[2] = Math.Max(1, (int)Math.Round(6.0 / h));
-            nu[3] = Math.Max(1, (int)Math.Round(2.0 / h)); 
-            nu[4] = Math.Max(1, (int)Math.Round(5.0 / h)); 
-
-            Func<int, double, double, double> colX = (c, u, z) =>
-            {
-                double xL, xR;
-                switch (c)
-                {
-                    case 0: xL = -10 + 0.5 * z; xR = -5; break;
-                    case 1: xL = -5; xR = -3; break;
-                    case 2: xL = -3; xR = 3; break;
-                    case 3: xL = 3; xR = 5; break;
-                    default: xL = 5; xR = 10 - 0.5 * z; break;
-                }
-                return xL + u * (xR - xL);
-            };
-
-            Func<double, int, int, int, int> N = (yVal, c, i, k) =>
-            {
-                double zVal = zMax * k / nzWall;
-                double uVal = (double)i / nu[c];
-                return GetOrAddNode(colX(c, uVal, zVal), yVal, zVal);
-            };
-
-            Action<double, double, int, Func<int, int, bool>> buildLayer =
-                (ya, yb, ny, inside) =>
-            {
-                for (int j = 0; j < ny; j++)
-                {
-                    double yA = ya + (yb - ya) * j / ny;
-                    double yB = ya + (yb - ya) * (j + 1) / ny;
-                    for (int c = 0; c < nCols; c++)
-                    {
-                        for (int i = 0; i < nu[c]; i++)
-                        {
-                            for (int k = 0; k < nzWall; k++)
-                            {
-                                if (!inside(c, k)) continue;
-
-                                int v0 = N(yA, c, i, k);
-                                int v1 = N(yA, c, i + 1, k);
-                                int v2 = N(yA, c, i + 1, k + 1);
-                                int v3 = N(yA, c, i, k + 1);
-                                int v4 = N(yB, c, i, k);
-                                int v5 = N(yB, c, i + 1, k);
-                                int v6 = N(yB, c, i + 1, k + 1);
-                                int v7 = N(yB, c, i, k + 1);
-
-                                hexes.Add(new Hex(new[] { v0, v1, v2, v3,
-                                                  v4, v5, v6, v7 }));
-                            }
-                        }
-                    }
-                }
-            };
-
-            buildLayer(y0, y1, nyA, (c, k) => true);
-
-            buildLayer(y1, y2, nyB, (c, k) => c != 2 || k < nzFloor);
-
-            buildLayer(y2, y3, nyC, (c, k) => c == 0 || c == 4 || k < nzFloor);
-
-            SplitToTets();
-            ExtractBoundaryFaces();
-            ExtractTetEdges();
+            Domain = DomainFileReader.Read(path);
         }
+
+       public void BuildFromDomain()
+{
+    Reset();
+    if (Domain == null) return;
+    var d = Domain;
+
+    int cx = d.Kx - 1, cy = d.Ky - 1, cz = d.Kz - 1;
+    var active = new bool[cx, cy, cz];
+
+    foreach (var s in d.Subdomains)
+    {
+        int i0 = Math.Max(0, s.Nxb - 1), i1 = Math.Min(cx, s.Nxe);
+        int j0 = Math.Max(0, s.Nyb - 1), j1 = Math.Min(cy, s.Nye);
+        int k0 = Math.Max(0, s.Nzb - 1), k1 = Math.Min(cz, s.Nze);
+        for (int k = k0; k < k1; k++)
+            for (int j = j0; j < j1; j++)
+                for (int i = i0; i < i1; i++)
+                    active[i, j, k] = true;
+    }
+    int[] nx = new int[d.Kx - 1];
+    for (int ii = 0; ii < d.Kx - 1; ii++)
+    {
+        double w = 0;
+        for (int j = 0; j < d.Ky; j++)
+            w += Math.Abs(d.X[j, ii + 1] - d.X[j, ii]);
+        w /= d.Ky;
+        nx[ii] = Math.Max(1, (int)Math.Round(w / h));
+    }
+    int[] ny = new int[d.Ky - 1];
+    for (int jj = 0; jj < d.Ky - 1; jj++)
+    {
+        double w = Math.Abs(d.Y[jj + 1, 0] - d.Y[jj, 0]);
+        ny[jj] = Math.Max(1, (int)Math.Round(w / h));
+    }
+    int[] nz = new int[d.Kz - 1];
+    for (int kk = 0; kk < d.Kz - 1; kk++)
+    {
+        double w = Math.Abs(d.Z[kk + 1] - d.Z[kk]);
+        nz[kk] = Math.Max(1, (int)Math.Round(w / h));
+    }
+
+    for (int i = 0; i < cx; i++)
+    for (int j = 0; j < cy; j++)
+    for (int k = 0; k < cz; k++)
+    {
+        if (!active[i, j, k]) continue;
+
+        double[] xs = { d.X[j, i],   d.X[j, i + 1], d.X[j + 1, i + 1], d.X[j + 1, i],
+                        d.X[j, i],   d.X[j, i + 1], d.X[j + 1, i + 1], d.X[j + 1, i] };
+        double[] ys = { d.Z[k],     d.Z[k],         d.Z[k],           d.Z[k],
+                        d.Z[k + 1], d.Z[k + 1],     d.Z[k + 1],       d.Z[k + 1] };
+        double[] zs = { d.Y[j, i],   d.Y[j, i + 1], d.Y[j + 1, i + 1], d.Y[j + 1, i],
+                        d.Y[j, i],   d.Y[j, i + 1], d.Y[j + 1, i + 1], d.Y[j + 1, i] };
+
+        int nu = nx[i], nv = ny[j], nw = nz[k];
+        int[,,] ids = new int[nu + 1, nv + 1, nw + 1];
+
+        for (int a = 0; a <= nu; a++)
+        for (int b = 0; b <= nv; b++)
+        for (int c = 0; c <= nw; c++)
+        {
+            double u = (double)a / nu;
+            double v = (double)b / nv;
+            double w = (double)c / nw;
+            ids[a, b, c] = GetOrAddNode(
+                Trilinear(u, v, w, xs),
+                Trilinear(u, v, w, ys),
+                Trilinear(u, v, w, zs));
+        }
+
+        for (int a = 0; a < nu; a++)
+        for (int b = 0; b < nv; b++)
+        for (int c = 0; c < nw; c++)
+        {
+            int v0 = ids[a, b, c];
+            int v1 = ids[a + 1, b, c];
+            int v2 = ids[a + 1, b + 1, c];
+            int v3 = ids[a, b + 1, c];
+            int v4 = ids[a, b, c + 1];
+            int v5 = ids[a + 1, b, c + 1];
+            int v6 = ids[a + 1, b + 1, c + 1];
+            int v7 = ids[a, b + 1, c + 1];
+            hexes.Add(new Hex(new[] { v0, v1, v2, v3, v4, v5, v6, v7 }));
+        }
+    }
+
+    SplitToTets();
+    ExtractBoundaryFaces();
+    ExtractTetEdges();
+}
+
+       
 
         private static readonly int[][] HexToTets = new int[][]
         {
@@ -259,7 +351,8 @@ namespace Lab1
             Tets.Clear();
             foreach (var hx in hexes)
                 foreach (var p in HexToTets)
-                    Tets.Add(new Tet(hx.V[p[0]], hx.V[p[1]], hx.V[p[2]], hx.V[p[3]]));
+                    Tets.Add(new Tet(hx.V[p[0]], hx.V[p[1]],
+                                     hx.V[p[2]], hx.V[p[3]]));
             hexes.Clear();
         }
 
@@ -268,7 +361,8 @@ namespace Lab1
             var map = new Dictionary<string, List<(int[] face, int tet)>>();
             for (int t = 0; t < Tets.Count; t++)
             {
-                int a = Tets[t].V[0], b = Tets[t].V[1], c = Tets[t].V[2], d = Tets[t].V[3];
+                int a = Tets[t].V[0], b = Tets[t].V[1];
+                int c = Tets[t].V[2], d = Tets[t].V[3];
                 int[][] fs =
                 {
                     new[]{a,b,c}, new[]{a,b,d}, new[]{a,c,d}, new[]{b,c,d}
@@ -401,10 +495,10 @@ namespace Lab1
                 if (e.KeyCode == Keys.D1) { mode = 1; Invalidate(); }
                 if (e.KeyCode == Keys.D2) { mode = 0; Invalidate(); }
                 if (e.KeyCode == Keys.D3) { mode = 2; Invalidate(); }
-                if (e.KeyCode == Keys.R) { angleX = 0.55; angleY = 0.75; zoom = 1.0; Invalidate(); }
+                if (e.KeyCode == Keys.R)
+                { angleX = 0.55; angleY = 0.75; zoom = 1.0; Invalidate(); }
                 if (e.KeyCode == Keys.Escape) Close();
 
-                // Управление плотностью сетки
                 if (e.KeyCode == Keys.Oemplus || e.KeyCode == Keys.Add)
                 {
                     mesh.h = Math.Max(mesh.h / 2.0, 0.1);
@@ -421,8 +515,7 @@ namespace Lab1
 
         private void Rebuild()
         {
-            mesh.Reset();
-            mesh.BuildShape();
+            mesh.BuildFromDomain();
             ComputeBounds();
             Text = $"МКА — лаб. №1 — h = {mesh.h:0.###}";
             Invalidate();
@@ -496,7 +589,8 @@ namespace Lab1
             double cosY = Math.Cos(angleY), sinY = Math.Sin(angleY);
             double cosX = Math.Cos(angleX), sinX = Math.Sin(angleX);
 
-            RotateAll(cosX, sinX, cosY, sinY, out var rx, out var ry, out var rz);
+            RotateAll(cosX, sinX, cosY, sinY,
+                      out var rx, out var ry, out var rz);
 
             if (mode == 0 || mode == 2) DrawSurface(g, cx, cy, s, rx, ry, rz);
             if (mode == 1 || mode == 2) DrawTetEdges(g, cx, cy, s, rx, ry, rz);
@@ -615,6 +709,7 @@ namespace Lab1
             }
         }
     }
+
     static class Program
     {
         [STAThread]
@@ -623,11 +718,36 @@ namespace Lab1
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            string path = "domain.txt";
+            if (!File.Exists(path)) File.WriteAllText(path, DefaultDomain);
+
             var mesh = new MeshGenerator();
             mesh.h = 1.0;
-            mesh.BuildShape();
+            mesh.LoadDomain(path);
+            mesh.BuildFromDomain();
 
             Application.Run(new MeshForm(mesh));
         }
+
+        private const string DefaultDomain =
+@"7 7
+-10 0  -5 0  -3 0  0 0  3 0  5 0  10 0
+-9.5 1  -5 1  -3 1  0 1  3 1  5 1  9.5 1
+-9 2  -5 2  -3 2  0 2  3 2  5 2  9 2
+-8.5 3  -5 3  -3 3  0 3  3 3  5 3  8.5 3
+-8 4  -5 4  -3 4  0 4  3 4  5 4  8 4
+-7.5 5  -5 5  -3 5  0 5  3 5  5 5  7.5 5
+-7 6  -5 6  -3 6  0 6  3 6  5 6  7 6
+4
+0 1 3 6
+7
+1 1 6 1 6 1 1
+1 1 2 1 6 2 2
+1 3 4 1 2 2 2
+1 5 6 1 6 2 2
+1 1 1 1 6 3 3
+1 2 5 1 2 3 3
+1 6 6 1 6 3 3
+";
     }
 }
