@@ -143,13 +143,16 @@ namespace Lab2
                 "P3 Lagrange (20 функций на КЭ)",
                 "P2 Hierarchical (10 функций на КЭ)",
                 "P3 Hierarchical (21 функция на КЭ)",
-                "Hermite 3-го порядка (требует DOF-реструктуризации)"
+                "Hermite 3-го порядка (16 функций на КЭ, 4 DOF/узел)"
             });
             cbScheme.SelectedIndex = 0;
             cbScheme.SelectedIndexChanged += (s, e) =>
             {
                 mesh.Scheme = (BasisScheme)cbScheme.SelectedIndex;
+                lab3.Reset();
                 ClearSelection();
+                if (infoBox != null)
+                    infoBox.AppendText("Схема изменена: старая матрица и решение сброшены. Соберите систему заново.\n");
                 Invalidate();
             };
             sidebar.Controls.Add(cbScheme);
@@ -724,6 +727,9 @@ namespace Lab2
         private void Rebuild()
         {
             mesh.BuildFromDomain();
+            lab3.Reset();
+            if (infoBox != null)
+                infoBox.AppendText("\nСетка перестроена: старая матрица и решение сброшены. Соберите систему заново.\n");
             ComputeBounds();
             Text = $"МКА — лаб. №2 — h = {mesh.h:0.###}";
             Invalidate();

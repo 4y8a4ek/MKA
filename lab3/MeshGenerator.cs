@@ -34,9 +34,12 @@ namespace Lab2
         public double h = 1.0;
         public DomainDescription Domain;
         public BasisScheme Scheme = BasisScheme.P1_Lagrange;
+        // Увеличивается при полном перестроении/сбросе сетки.
+        public int Revision { get; private set; }
 
         public void Reset()
         {
+            Revision++;
             Nodes.Clear(); Tets.Clear(); BoundaryFaces.Clear(); TetEdges.Clear();
             Edges.Clear(); Faces.Clear(); edgeMap.Clear(); faceMap.Clear();
             NodeToTets.Clear(); NodeToEdges.Clear(); NodeToFaces.Clear();
@@ -455,6 +458,7 @@ namespace Lab2
 
         public int TotalBasisFunctions()
         {
+            if (Scheme == BasisScheme.Hermite_3) return 4 * NumVertices;
             int ep = EdgeFunctionsPerEdge();
             int total = NumVertices + ep * NumEdges;
             if (HasFaceFunctions()) total += NumFaces;
@@ -462,7 +466,7 @@ namespace Lab2
             return total;
         }
 
-        public int VertexBasisNumber(int nodeId) => nodeId + 1;
+        public int VertexBasisNumber(int nodeId) => Scheme == BasisScheme.Hermite_3 ? 4 * nodeId + 1 : nodeId + 1;
 
         public int EdgeBasisBase(int edgeId)
         {
@@ -481,6 +485,12 @@ namespace Lab2
 
         public (string type, int id, int sub) FindBasisObject(int globalNumber)
         {
+            if (Scheme == BasisScheme.Hermite_3)
+            {
+                int h = globalNumber - 1;
+                if (h < 0 || h >= 4 * NumVertices) return ("none", -1, 0);
+                return ("vertex", h / 4, h % 4);
+            }
             int n = globalNumber - 1;
             if (n < 0 || n >= TotalBasisFunctions()) return ("none", -1, 0);
             int NN = NumVertices, NE = NumEdges, NF = NumFaces, NT = NumTets;
@@ -499,6 +509,18 @@ namespace Lab2
         {
             var list = new List<(int, int, string, string)>();
             var tet = Tets[t];
+            if (Scheme == BasisScheme.Hermite_3)
+            {
+                for (int i = 0; i < 4; i++)
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int node = tet.V[i];
+                        string[] names = { "u", "du/dx", "du/dy", "du/dz" };
+                        list.Add((4 * i + d + 1, 4 * node + d + 1, "vertex",
+                                  $"узел {node + 1} ({names[d]})"));
+                    }
+                return list;
+            }
             for (int i = 0; i < 4; i++)
                 list.Add((i + 1, VertexBasisNumber(tet.V[i]), "vertex", $"узел {tet.V[i] + 1}"));
 
